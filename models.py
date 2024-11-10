@@ -19,12 +19,13 @@ class ConsonantVowelClassifier(object):
         """
 
         vocab_index = {
+
             'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7, 'i': 8, 'j': 9, 
             'k': 10, 'l': 11, 'm': 12, 'n': 13, 'o': 14, 'p': 15, 'q': 16, 'r': 17, 's': 18, 
             't': 19, 'u': 20, 'v': 21, 'w': 22, 'x': 23, 'y': 24, 'z': 25, ' ': 26
+        
         }
 
-        
         # Convert context to tensor of indices and add batch dimension
         context_indices = [vocab_index[c] for c in context if c in vocab_index]
         context_tensor = torch.tensor(context_indices).unsqueeze(0).long()  # Shape: (1, seq_len)
@@ -56,21 +57,20 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
 
 class RNNClassifier(ConsonantVowelClassifier, nn.Module):
 
-    def __init__(self, vocab_size, embed_size, hidden_size, output_size, num_layers=1, dropout=0.0):
+
+    def __init__(self, embed_size, hidden_size, input_size=27, output_size=2):
         super(RNNClassifier, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.gru = nn.GRU(embed_size, hidden_size, batch_first=True)
-        self.fc = nn.Linear(hidden_size, output_size)
+        self.embedding  = nn.Embedding(input_size, embed_size)
+        self.gru        = nn.GRU(embed_size, hidden_size, batch_first=True)
+        self.fc         = nn.Linear(hidden_size, output_size)
 
-
-    def forward(self, context_tensor):
-
-        embedded = self.embedding(context_tensor)  # Convert context indices to embeddings # Shape: (batch_size, seq_len, embed_size)
-        _, hidden = self.gru(embedded)             # Pass through GRU layer  # `hidden` is of shape (1, batch_size, hidden_size)
-        output = self.fc(hidden.squeeze(0))        # Fully connected layer on hidden state  # Shape: (batch_size, output_size)
+    def forward(self, context_tensor):       
+        embedded    = self.embedding(context_tensor)  # Shape: (batch_size, seq_len, embed_size)   # Convert context indices to embedding
+        _ , hidden  = self.gru(embedded)            # `hidden` is of shape (1, batch_size, hidden_size)         # Pass through GRU layer
+        output      = self.fc(hidden.squeeze(0))        # Shape: (batch_size, output_size)   # Fully connected layer on hidden state
         return output
 
-      
+        
 
 def train_frequency_based_classifier(cons_exs, vowel_exs):
     consonant_counts = collections.Counter()
@@ -80,6 +80,11 @@ def train_frequency_based_classifier(cons_exs, vowel_exs):
     for ex in vowel_exs:
         vowel_counts[ex[-1]] += 1
     return FrequencyBasedClassifier(consonant_counts, vowel_counts)
+
+
+
+def string_to_tensor():
+    pass
 
 
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
@@ -95,15 +100,13 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
 
     # Hyperparameters
     embed_size = 64      # Size of the embedding vectors
-    hidden_size = 128    # Number of hidden units in GRU
+    hidden_size = 64     # Number of hidden units in GRU
     output_size = 2      # Binary output: consonant (0) or vowel (1)
-    learning_rate = 0.001
+    learning_rate = 0.0001
     num_epochs = 10
 
-    print("Hello World!")
-
-    
-    model = RNNClassifier(len(vocab_index), embed_size, hidden_size, output_size)   # Instantiate model, loss function, and optimizer
+    # Instantiate model, loss function, and optimizer
+    model = RNNClassifier( embed_size = embed_size, hidden_size = hidden_size)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -115,26 +118,22 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     }
 
 
-
-
     # Prepare training data as a list of (sequence, label) pairs
     train_data = [(ex, 0) for ex in train_cons_exs] + [(ex, 1) for ex in train_vowel_exs]
     dev_data = [(ex, 0) for ex in dev_cons_exs] + [(ex, 1) for ex in dev_vowel_exs]
 
- 
+
     # Training loop
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
 
         for context, label in train_data:
-            # Convert context to indices and label to tensor
-            context_indices = [vocab_index[c] for c in context if c in vocab_index]
-            context_tensor = torch.tensor(context_indices).unsqueeze(0).long()  # Shape: (1, seq_len)
+            context_indices = [vocab_index[c] for c in context if c in vocab_index] # Convert context to indices and label to tensor
+            context_tensor = torch.tensor(context_indices).unsqueeze(0).long()      # Shape: (1, seq_len)
             label_tensor = torch.tensor([label])
-
-            # Zero gradients, perform forward pass, compute loss, backpropagate, and update weights
-            optimizer.zero_grad()
+           
+            optimizer.zero_grad()  # Zero gradients, perform forward pass, compute loss, backpropagate, and update weights
             output = model(context_tensor)
             loss = criterion(output, label_tensor)
             loss.backward()
@@ -144,8 +143,8 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
 
         print(f"Epoch {epoch + 1}, Loss: {total_loss / len(train_data)}")
 
-    # Evaluation on dev data
-    model.eval()
+   
+    model.eval()  # Evaluation on dev data
     correct = 0
     with torch.no_grad():
         for context, label in dev_data:

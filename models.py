@@ -17,7 +17,24 @@ class ConsonantVowelClassifier(object):
         :param context:
         :return: 1 if vowel, 0 if consonant
         """
-        raise Exception("Only implemented in subclasses")
+
+        vocab_index = {
+            'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7, 'i': 8, 'j': 9, 
+            'k': 10, 'l': 11, 'm': 12, 'n': 13, 'o': 14, 'p': 15, 'q': 16, 'r': 17, 's': 18, 
+            't': 19, 'u': 20, 'v': 21, 'w': 22, 'x': 23, 'y': 24, 'z': 25, ' ': 26
+        }
+
+        
+        # Convert context to tensor of indices and add batch dimension
+        context_indices = [vocab_index[c] for c in context if c in vocab_index]
+        context_tensor = torch.tensor(context_indices).unsqueeze(0).long()  # Shape: (1, seq_len)
+        
+        # Get the model's output and make prediction
+        with torch.no_grad():
+            output = self.forward(context_tensor)
+            prediction = torch.argmax(output, dim=1).item()  # Take index with highest score
+        return prediction
+
 
 
 class FrequencyBasedClassifier(ConsonantVowelClassifier):
@@ -39,34 +56,21 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
 
 class RNNClassifier(ConsonantVowelClassifier, nn.Module):
 
-    def __init__(self, vocab_size, embed_size, hidden_size, output_size):
+    def __init__(self, vocab_size, embed_size, hidden_size, output_size, num_layers=1, dropout=0.0):
         super(RNNClassifier, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
         self.gru = nn.GRU(embed_size, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
 
+
     def forward(self, context_tensor):
-        # Convert context indices to embeddings
-        embedded = self.embedding(context_tensor)  # Shape: (batch_size, seq_len, embed_size)
-        
-        # Pass through GRU layer
-        _, hidden = self.gru(embedded)  # `hidden` is of shape (1, batch_size, hidden_size)
-        
-        # Fully connected layer on hidden state
-        output = self.fc(hidden.squeeze(0))  # Shape: (batch_size, output_size)
+
+        embedded = self.embedding(context_tensor)  # Convert context indices to embeddings # Shape: (batch_size, seq_len, embed_size)
+        _, hidden = self.gru(embedded)             # Pass through GRU layer  # `hidden` is of shape (1, batch_size, hidden_size)
+        output = self.fc(hidden.squeeze(0))        # Fully connected layer on hidden state  # Shape: (batch_size, output_size)
         return output
 
-    def predict(self, context):
-        # Convert context to tensor of indices and add batch dimension
-        context_indices = [vocab_index[c] for c in context if c in vocab_index]
-        context_tensor = torch.tensor(context_indices).unsqueeze(0).long()  # Shape: (1, seq_len)
-        
-        # Get the model's output and make prediction
-        with torch.no_grad():
-            output = self.forward(context_tensor)
-            prediction = torch.argmax(output, dim=1).item()  # Take index with highest score
-        return prediction
-
+      
 
 def train_frequency_based_classifier(cons_exs, vowel_exs):
     consonant_counts = collections.Counter()
@@ -96,49 +100,28 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     learning_rate = 0.001
     num_epochs = 10
 
-    # Instantiate model, loss function, and optimizer
-    model = RNNClassifier(len(vocab_index), embed_size, hidden_size, output_size)
+    print("Hello World!")
+
+    
+    model = RNNClassifier(len(vocab_index), embed_size, hidden_size, output_size)   # Instantiate model, loss function, and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 
-    # vocab_chars = vocab_index.vocab  # Update this line based on your actual `Indexer` setup
-    
-    # context_indices = [
-    #     vocab_index[c] for c in context if c in vocab_chars
-    # ]
+    vocab_index = {
+        'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7, 'i': 8, 'j': 9, 
+        'k': 10, 'l': 11, 'm': 12, 'n': 13, 'o': 14, 'p': 15, 'q': 16, 'r': 17, 's': 18, 
+        't': 19, 'u': 20, 'v': 21, 'w': 22, 'x': 23, 'y': 24, 'z': 25, ' ': 26
+    }
 
 
-
-    vocab_index = {'a': 1,'b': 2, 'c': 3,'d': 4,'e': 5,'f': 6,'g': 7,'h': 8,'i': 9,'j': 10,'k': 11,'l': 12,'m': 13,'n': 14,
-                        'o': 15,'p': 16,'q': 17,'r': 18,'s': 19,'t': 20,'u': 21,'v': 22,'w': 23,'x': 24,'y': 25,'z': 26,' ': 27
-                }
-
-    
 
 
     # Prepare training data as a list of (sequence, label) pairs
     train_data = [(ex, 0) for ex in train_cons_exs] + [(ex, 1) for ex in train_vowel_exs]
     dev_data = [(ex, 0) for ex in dev_cons_exs] + [(ex, 1) for ex in dev_vowel_exs]
 
-
-    print(train_cons_exs[0:5])
-    print(train_vowel_exs[0:5])
-
-
-    print("\n")
-    #print(dev_data)
-
-    """
-    [
-        ('cat', 0), ('dog', 0), ('bat', 0),  # Consonant examples
-        ('pie', 1), ('toe', 1), ('cue', 1)   # Vowel examples
-    ]
-    
-    """
-
-   
-
+ 
     # Training loop
     for epoch in range(num_epochs):
         model.train()

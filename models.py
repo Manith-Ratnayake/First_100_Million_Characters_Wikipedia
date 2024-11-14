@@ -1,17 +1,11 @@
 # models.py
 
-import numpy as np
-import collections
-
 import torch
-import torch.nn as nn
+import torch.nn as nn 
 import torch.optim as optim
 import torch.nn.functional as F
-
-from torch.utils.data import DataLoader, Dataset
-from torch.nn.utils.rnn import pad_sequence
-
-
+import numpy as np
+import collections
 
 #####################
 # MODELS FOR PART 1 #
@@ -23,25 +17,7 @@ class ConsonantVowelClassifier(object):
         :param context:
         :return: 1 if vowel, 0 if consonant
         """
-
-        # vocab_index = {
-
-        #     'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7, 'i': 8, 'j': 9, 
-        #     'k': 10, 'l': 11, 'm': 12, 'n': 13, 'o': 14, 'p': 15, 'q': 16, 'r': 17, 's': 18, 
-        #     't': 19, 'u': 20, 'v': 21, 'w': 22, 'x': 23, 'y': 24, 'z': 25, ' ': 26
-        
-        # }
-
-        # # Convert context to tensor of indices and add batch dimension
-        # context_indices = [vocab_index[c] for c in context if c in vocab_index]
-        # context_tensor = torch.tensor(context_indices).unsqueeze(0).long()  # Shape: (1, seq_len)
-        
-        # # Get the model's output and make prediction
-        # with torch.no_grad():
-        #     output = self.forward(context_tensor)
-        #     prediction = torch.argmax(output, dim=1).item()  # Take index with highest score
-        # return prediction
-        print("Something.........")
+        raise Exception("Only implemented in subclasses")
 
 
 class FrequencyBasedClassifier(ConsonantVowelClassifier):
@@ -49,7 +25,7 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
     Classifier based on the last letter before the space. If it has occurred with more consonants than vowels,
     classify as consonant, otherwise as vowel.
     """
-    def __init__(self, consonant_counts, vowel_counts):
+    def _init_(self, consonant_counts, vowel_counts):
         self.consonant_counts = consonant_counts
         self.vowel_counts = vowel_counts
 
@@ -63,21 +39,46 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
 
 class RNNClassifier(ConsonantVowelClassifier, nn.Module):
 
-
-    def __init__(self, vocab_size, embed_size, hidden_size, output_size):
-        super(RNNClassifier, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.rnn = nn.GRU(embed_size, hidden_size, batch_first=True)  # Using GRU
+    
+    def _init_(self, vocabulary_size, embedding_size, hidden_size, output_size):
+        super(RNNClassifier, self)._init_()
+        
+        self.embedding = nn.Embedding(vocabulary_size, embedding_size)
+        self.gru = nn.GRU(embedding_size, hidden_size, batch_first=True, bidirectional=False)  # Using GRU
         self.fc = nn.Linear(hidden_size, output_size)
+
 
     def forward(self, x):
         embedded = self.embedding(x)
-        _, hidden = self.rnn(embedded)      # GRU returns only the hidden state
-        logits = self.fc(hidden[-1])        # Apply fully connected layer to last hidden state
-        output = F.softmax(logits, dim=1)   # Apply Softmax to get probabilities
+        output, hidden = self.gru(embedded)  # GRU returns output and hidden state
+        
+        # If GRU is bidirectional, hidden will have 2 layers (forward and backward)
+        # We need to select the final hidden state from the correct direction
+        if isinstance(hidden, tuple):
+            hidden = hidden[0]  # GRU returns a tuple (hidden, cell_state), so we only need hidden
+        
+        # Get the last hidden state (for sequence classification)
+        # If bidirectional, we concatenate the forward and backward hidden states
+        if self.gru.bidirectional:
+            hidden = hidden[-2:].transpose(0, 1).contiguous().view(hidden.size(1), -1)
+        else:
+            hidden = hidden[-1]
+        
+        logits = self.fc(hidden)  # Apply the fully connected layer
+        output = F.softmax(logits, dim=1)  # Apply Softmax to get probabilities
         return output
 
+
+    def predict(self, context):
         
+        self.eval()
+
+        with torch.no_grad():
+            context           = string_to_tensor(context)
+            output            = self(context)
+            value, prediction = torch.max(output, 1)
+            return prediction
+
 
 def train_frequency_based_classifier(cons_exs, vowel_exs):
     consonant_counts = collections.Counter()
@@ -89,9 +90,16 @@ def train_frequency_based_classifier(cons_exs, vowel_exs):
     return FrequencyBasedClassifier(consonant_counts, vowel_counts)
 
 
+def string_to_tensor(s):
 
+    vocab_index = {
+        'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7, 'i': 8, 'j': 9, 
+        'k': 10, 'l': 11, 'm': 12, 'n': 13, 'o': 14, 'p': 15, 'q': 16, 'r': 17, 's': 18, 
+        't': 19, 'u': 20, 'v': 21, 'w': 22, 'x': 23, 'y': 24, 'z': 25, ' ': 26
+    }
 
-
+    indices = [vocab_index[c] for c in s]
+    return torch.tensor(indices, dtype=torch.long).unsqueeze(0)
 
 
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
@@ -104,41 +112,65 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     :param vocab_index: an Indexer of the character vocabulary (27 characters)
     :return: an RNNClassifier instance trained on the given data
     """
+    
+    vocabulary_size = 27
+    embedding_size  = 16  # small embedding size for this task
+    hidden_size     = 16  # small hidden size, adjustable
+    output_size     = 2  # two classes: consonant and vowel
+    epochs          = 50
 
-    vocab_size = 27
-    embed_size = 32  # small embedding size for this task
-    hidden_size = 32  # small hidden size, adjustable
-    output_size = 2  # two classes: consonant and vowel
-    epochs     = 10
 
-
-
-    model = RNNClassifier(vocab_size, embed_size, hidden_size, output_size)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    model     = RNNClassifier(vocabulary_size, embedding_size, hidden_size, output_size)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
     criterion = nn.CrossEntropyLoss()
 
     # Prepare training data
-    train_data = [(ex, 0) for ex in train_cons_exs] + [(ex, 1) for ex in train_vowel_exs]
-    dev_data = [(ex, 0) for ex in dev_cons_exs] + [(ex, 1) for ex in dev_vowel_exs]
+    train_data = [(sentence, 0) for sentence in train_cons_exs] + [(sentence, 1) for sentence in train_vowel_exs]
+    dev_data = [(sentence, 0) for sentence in dev_cons_exs] + [(sentence, 1) for sentence in dev_vowel_exs]
 
-    def string_to_tensor(s):
-        indices = [vocab_index.index_of(c) for c in s]
-        return torch.tensor(indices, dtype=torch.long).unsqueeze(0)
 
     # Training loop
     for epoch in range(epochs):
         model.train()
         total_loss = 0
-        for ex, label in train_data:
+
+        for example, label in train_data:
+
             optimizer.zero_grad()
-            input_tensor = string_to_tensor(ex)
-            target = torch.tensor([label], dtype=torch.long)
-            output = model(input_tensor)
-            loss = criterion(output, target)
-            loss.backward()
+            input_tensor            = string_to_tensor(example)
+            target                  = torch.tensor([label], dtype=torch.long)
+            output                  = model(input_tensor)
+            loss                    = criterion(output, target)
+            
+            loss.backward()                # Backpropagation
             optimizer.step()
             total_loss += loss.item()
 
+            print(f"input tensor : {input_tensor} \nTarget : {target} \nOutput : {output} \nLoss : {loss}\n\n") 
+
+        # Early stopping check
+        if val_loss < best_loss:
+            best_loss = val_loss
+            patience_counter = 0
+            best_model = model.state_dict()  # Save the best model
+        else:
+            patience_counter += 1
+
+        if patience_counter >= patience:
+            print("Early stopping triggered")
+            break
+
+    # Load the best model if early stopping was triggered
+    model.load_state_dict(best_model)    
+    return model
+
+
+
+
+
+
+
+'''
         # Evaluate on development data
         model.eval()
         correct = 0
@@ -147,7 +179,11 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
                 input_tensor = string_to_tensor(ex)
                 target = torch.tensor([label], dtype=torch.long)
                 output = model(input_tensor)
-                _, pred = torch.max(output, 1)
+
+                value, pred = torch.max(output, 1)
+                print(f"Output : {output} Value : {value} \n Pred {pred} \n\n")
+                
+
                 correct += (pred == target).sum().item()
 
         accuracy = correct / len(dev_data)
@@ -155,6 +191,8 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
 
     return model
 
+
+''' 
 
 
 #####################
@@ -173,8 +211,6 @@ class LanguageModel(object):
         :param context: a single character to score
         :return:
         """
-        raise Exception("Only implemented in subclasses")
-
 
     def get_log_prob_sequence(self, next_chars, context):
         """
@@ -189,7 +225,7 @@ class LanguageModel(object):
 
 
 class UniformLanguageModel(LanguageModel):
-    def __init__(self, voc_size):
+    def _init_(self, voc_size):
         self.voc_size = voc_size
 
     def get_log_prob_single(self, next_char, context):
@@ -200,13 +236,34 @@ class UniformLanguageModel(LanguageModel):
 
 
 class RNNLanguageModel(LanguageModel):
-    def __init__(self, model_emb, model_dec, vocab_index):
+    def _init_(self, model_emb, model_dec, vocab_index):
         self.model_emb = model_emb
         self.model_dec = model_dec
         self.vocab_index = vocab_index
+        # 
+        self.vocab_size = len(vocab_index)
+        
 
     def get_log_prob_single(self, next_char, context):
-        raise Exception("Implement me")
+        
+        # Convert context to indices
+        context_indices = [self.vocab_index[c] for c in context if c in self.vocab_index]
+        context_tensor = torch.tensor(context_indices).unsqueeze(0).long()  # Shape: (1, context_len)
+
+        # Forward pass through the RNN
+        with torch.no_grad():
+            output = self.model_dec(context_tensor)  # Shape: (1, context_len, vocab_size)
+        
+        # Extract last output
+        last_output = output[0, -1]  # Shape: (vocab_size,)
+        
+        # Get log probability of next_char
+        next_char_idx = self.vocab_index.get(next_char, None)
+        if next_char_idx is not None:
+            log_prob = torch.log_softmax(last_output, dim=0)[next_char_idx].item()
+        else:
+            log_prob = -float('inf')  # Return -inf if character is not in vocab
+        return log_prob
 
     def get_log_prob_sequence(self, next_chars, context):
         raise Exception("Implement me")

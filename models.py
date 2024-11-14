@@ -6,6 +6,12 @@ import collections
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
+
+from torch.utils.data import DataLoader, Dataset
+from torch.nn.utils.rnn import pad_sequence
+
+
 
 #####################
 # MODELS FOR PART 1 #
@@ -18,24 +24,24 @@ class ConsonantVowelClassifier(object):
         :return: 1 if vowel, 0 if consonant
         """
 
-        vocab_index = {
+        # vocab_index = {
 
-            'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7, 'i': 8, 'j': 9, 
-            'k': 10, 'l': 11, 'm': 12, 'n': 13, 'o': 14, 'p': 15, 'q': 16, 'r': 17, 's': 18, 
-            't': 19, 'u': 20, 'v': 21, 'w': 22, 'x': 23, 'y': 24, 'z': 25, ' ': 26
+        #     'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7, 'i': 8, 'j': 9, 
+        #     'k': 10, 'l': 11, 'm': 12, 'n': 13, 'o': 14, 'p': 15, 'q': 16, 'r': 17, 's': 18, 
+        #     't': 19, 'u': 20, 'v': 21, 'w': 22, 'x': 23, 'y': 24, 'z': 25, ' ': 26
         
-        }
+        # }
 
-        # Convert context to tensor of indices and add batch dimension
-        context_indices = [vocab_index[c] for c in context if c in vocab_index]
-        context_tensor = torch.tensor(context_indices).unsqueeze(0).long()  # Shape: (1, seq_len)
+        # # Convert context to tensor of indices and add batch dimension
+        # context_indices = [vocab_index[c] for c in context if c in vocab_index]
+        # context_tensor = torch.tensor(context_indices).unsqueeze(0).long()  # Shape: (1, seq_len)
         
-        # Get the model's output and make prediction
-        with torch.no_grad():
-            output = self.forward(context_tensor)
-            prediction = torch.argmax(output, dim=1).item()  # Take index with highest score
-        return prediction
-
+        # # Get the model's output and make prediction
+        # with torch.no_grad():
+        #     output = self.forward(context_tensor)
+        #     prediction = torch.argmax(output, dim=1).item()  # Take index with highest score
+        # return prediction
+        print("Something.........")
 
 
 class FrequencyBasedClassifier(ConsonantVowelClassifier):
@@ -58,16 +64,17 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
 class RNNClassifier(ConsonantVowelClassifier, nn.Module):
 
 
-    def __init__(self, embed_size, hidden_size, input_size=27, output_size=2):
+    def __init__(self, vocab_size, embed_size, hidden_size, output_size):
         super(RNNClassifier, self).__init__()
-        self.embedding  = nn.Embedding(input_size, embed_size)
-        self.gru        = nn.GRU(embed_size, hidden_size, batch_first=True)
-        self.fc         = nn.Linear(hidden_size, output_size)
+        self.embedding = nn.Embedding(vocab_size, embed_size)
+        self.rnn = nn.GRU(embed_size, hidden_size, batch_first=True)  # Using GRU
+        self.fc = nn.Linear(hidden_size, output_size)
 
-    def forward(self, context_tensor):       
-        embedded    = self.embedding(context_tensor)  # Shape: (batch_size, seq_len, embed_size)   # Convert context indices to embedding
-        _ , hidden  = self.gru(embedded)            # `hidden` is of shape (1, batch_size, hidden_size)         # Pass through GRU layer
-        output      = self.fc(hidden.squeeze(0))        # Shape: (batch_size, output_size)   # Fully connected layer on hidden state
+    def forward(self, x):
+        embedded = self.embedding(x)
+        _, hidden = self.rnn(embedded)      # GRU returns only the hidden state
+        logits = self.fc(hidden[-1])        # Apply fully connected layer to last hidden state
+        output = F.softmax(logits, dim=1)   # Apply Softmax to get probabilities
         return output
 
         
@@ -83,8 +90,8 @@ def train_frequency_based_classifier(cons_exs, vowel_exs):
 
 
 
-def string_to_tensor():
-    pass
+
+
 
 
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
@@ -98,60 +105,53 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     :return: an RNNClassifier instance trained on the given data
     """
 
-    # Hyperparameters
-    embed_size = 64      # Size of the embedding vectors
-    hidden_size = 64     # Number of hidden units in GRU
-    output_size = 2      # Binary output: consonant (0) or vowel (1)
-    learning_rate = 0.0001
-    num_epochs = 10
+    vocab_size = 27
+    embed_size = 32  # small embedding size for this task
+    hidden_size = 32  # small hidden size, adjustable
+    output_size = 2  # two classes: consonant and vowel
+    epochs     = 10
 
-    # Instantiate model, loss function, and optimizer
-    model = RNNClassifier( embed_size = embed_size, hidden_size = hidden_size)
+
+
+    model = RNNClassifier(vocab_size, embed_size, hidden_size, output_size)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-
-    vocab_index = {
-        'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7, 'i': 8, 'j': 9, 
-        'k': 10, 'l': 11, 'm': 12, 'n': 13, 'o': 14, 'p': 15, 'q': 16, 'r': 17, 's': 18, 
-        't': 19, 'u': 20, 'v': 21, 'w': 22, 'x': 23, 'y': 24, 'z': 25, ' ': 26
-    }
-
-
-    # Prepare training data as a list of (sequence, label) pairs
+    # Prepare training data
     train_data = [(ex, 0) for ex in train_cons_exs] + [(ex, 1) for ex in train_vowel_exs]
     dev_data = [(ex, 0) for ex in dev_cons_exs] + [(ex, 1) for ex in dev_vowel_exs]
 
+    def string_to_tensor(s):
+        indices = [vocab_index.index_of(c) for c in s]
+        return torch.tensor(indices, dtype=torch.long).unsqueeze(0)
 
     # Training loop
-    for epoch in range(num_epochs):
+    for epoch in range(epochs):
         model.train()
         total_loss = 0
-
-        for context, label in train_data:
-            context_indices = [vocab_index[c] for c in context if c in vocab_index] # Convert context to indices and label to tensor
-            context_tensor = torch.tensor(context_indices).unsqueeze(0).long()      # Shape: (1, seq_len)
-            label_tensor = torch.tensor([label])
-           
-            optimizer.zero_grad()  # Zero gradients, perform forward pass, compute loss, backpropagate, and update weights
-            output = model(context_tensor)
-            loss = criterion(output, label_tensor)
+        for ex, label in train_data:
+            optimizer.zero_grad()
+            input_tensor = string_to_tensor(ex)
+            target = torch.tensor([label], dtype=torch.long)
+            output = model(input_tensor)
+            loss = criterion(output, target)
             loss.backward()
             optimizer.step()
-
             total_loss += loss.item()
 
-        print(f"Epoch {epoch + 1}, Loss: {total_loss / len(train_data)}")
+        # Evaluate on development data
+        model.eval()
+        correct = 0
+        with torch.no_grad():
+            for ex, label in dev_data:
+                input_tensor = string_to_tensor(ex)
+                target = torch.tensor([label], dtype=torch.long)
+                output = model(input_tensor)
+                _, pred = torch.max(output, 1)
+                correct += (pred == target).sum().item()
 
-   
-    model.eval()  # Evaluation on dev data
-    correct = 0
-    with torch.no_grad():
-        for context, label in dev_data:
-            if model.predict(context) == label:
-                correct += 1
-    accuracy = correct / len(dev_data) * 100
-    print(f"Validation Accuracy: {accuracy:.2f}%")
+        accuracy = correct / len(dev_data)
+        print(f'Epoch {epoch+1}, Loss: {total_loss:.4f}, Dev Accuracy: {accuracy:.4f}')
 
     return model
 
